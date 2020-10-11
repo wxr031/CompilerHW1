@@ -20,6 +20,8 @@ enum TokenType {
   IDENTIFIER,
   BIN_OP_ADD,    // addition operator ("+")
   BIN_OP_SUB,    // subtraction operator ("-")
+  BIN_OP_MUL,    // subtraction operator ("*")
+  BIN_OP_DIV,    // subtraction operator ("/")
   BIN_OP_ASSIGN, // assignment operator ("=")
   END_OF_FILE    // EOF
 };
@@ -119,6 +121,10 @@ Token Tokenizer::getOpToken(char C) const {
     return Token{BIN_OP_ADD};
   case '-':
     return Token{BIN_OP_SUB};
+  case '*':
+    return Token{BIN_OP_MUL};
+  case '/':
+    return Token{BIN_OP_DIV};
   case '=':
     return Token{BIN_OP_ASSIGN};
   default:
@@ -164,6 +170,10 @@ std::ostream &operator<<(std::ostream &S, TokenType T) {
     return S << "BIN_OP_ADD";
   case BIN_OP_SUB:
     return S << "BIN_OP_SUB";
+  case BIN_OP_MUL:
+    return S << "BIN_OP_MUL";
+  case BIN_OP_DIV:
+    return S << "BIN_OP_DIV";
   case BIN_OP_ASSIGN:
     return S << "BIN_OP_ASSIGN";
   case END_OF_FILE:
@@ -190,6 +200,8 @@ enum ASTNodeType {
   CONST_FLOAT_NODE,
   BIN_ADD_NODE,
   BIN_SUB_NODE,
+  BIN_MUL_NODE,
+  BIN_DIV_NODE,
   CONVERSION_NODE
 };
 
@@ -333,7 +345,7 @@ DataType Parser::getDataType(AST *Node) const {
   if (Node->Type == IDENTIFIER_NODE)
     return ST.getVarType(std::get<size_t>(Node->Value)) == VAR_INT ? DATA_INT
                                                                    : DATA_FLOAT;
-  if (Node->Type == BIN_ADD_NODE || Node->Type == BIN_SUB_NODE)
+  if (Node->Type == BIN_ADD_NODE || Node->Type == BIN_SUB_NODE || Node->Type == BIN_MUL_NODE || Node->Type == BIN_DIV_NODE)
     return std::get<DataType>(Node->Value);
 
   emitError("Parser", "unexpected AST node type.");
@@ -384,15 +396,47 @@ AST *Parser::parseValue() {
 
 AST *Parser::parseExpression(AST *LHS) {
   TokenType Type = TK.peekToken().Type;
-  if (Type != BIN_OP_ADD && Type != BIN_OP_SUB)
+  if (Type != BIN_OP_ADD && Type != BIN_OP_SUB && Type != BIN_OP_MUL && Type != BIN_OP_DIV)
     return LHS;
 
   TK.readToken();
-  AST *Node = new AST(Type == BIN_OP_ADD ? BIN_ADD_NODE : BIN_SUB_NODE);
+  ASTNodeType nodeType;
+  switch (Type) {
+    case BIN_OP_ADD:
+      nodeType = BIN_ADD_NODE;
+      break;
+    case BIN_OP_SUB:
+      nodeType = BIN_SUB_NODE;
+      break;
+    case BIN_OP_MUL:
+      nodeType = BIN_MUL_NODE;
+      break;
+    case BIN_OP_DIV:
+      nodeType = BIN_DIV_NODE;
+      break;
+    default:
+    __builtin_unreachable();
+  }
+  AST *Node = new AST(nodeType);
   AST *RHS = parseValue();
-  Node->Value = promoteType(LHS, RHS);
-  Node->SubTree = {LHS, RHS};
-  return parseExpression(Node);
+  if (TK.peekToken().Type == BIN_OP_MUL || TK.peekToken().Type == BIN_OP_DIV) {
+    TokenType Type2 = TK.peekToken().Type;
+    TK.readToken();
+    AST *RHS2 = parseValue();
+    AST *Node2 = new AST(Type2 == BIN_OP_MUL ? BIN_MUL_NODE : BIN_DIV_NODE);
+    AST *LHS2 = RHS;
+    Node2->Value = promoteType(LHS, RHS);
+    Node2->SubTree = {LHS2, RHS2};
+    RHS = parseExpression(Node2);
+    Node->Value = promoteType(LHS, RHS);
+    Node->SubTree = {RHS, LHS};
+    return parseExpression(Node);
+  }
+  else {
+    Node->Value = promoteType(LHS, RHS);
+    Node->SubTree = {LHS, RHS};
+    return parseExpression(Node);
+  }
 }
 
 class DCCodeGen {
@@ -436,7 +480,18 @@ void DCCodeGen::genAssignment(AST *Stmt) {
 }
 
 inline char printOperator(ASTNodeType Type) {
-  return Type == BIN_ADD_NODE ? '+' : '-';
+  switch (Type) {
+    case BIN_ADD_NODE:
+      return '+';
+    case BIN_SUB_NODE:
+      return '-';
+    case BIN_MUL_NODE:
+      return '*';
+    case BIN_DIV_NODE:
+      return '/';
+    default:
+      __builtin_unreachable();
+  }
 }
 
 void DCCodeGen::genExpression(AST *Expr) {
@@ -454,7 +509,9 @@ void DCCodeGen::genExpression(AST *Expr) {
     OFS << std::get<float>(Expr->Value) << "\n";
     return;
   case BIN_ADD_NODE:
-  case BIN_SUB_NODE: {
+  case BIN_SUB_NODE: 
+  case BIN_MUL_NODE:
+  case BIN_DIV_NODE: {
     assert(Expr->SubTree.size() == 2 &&
            "Expecting two children for binary expressions.");
     genExpression(Expr->SubTree[0]);
@@ -479,6 +536,20 @@ void DCCodeGen::genPrintStmt(AST *Stmt) {
   OFS << "p\n";
 }
 
+#ifdef DEBUG
+void inorder(AST *ast, int depth = 0) {
+    if (ast->SubTree.size() == 0)
+        return;
+    int c = 0;
+    for (AST *node : ast->SubTree) {
+        std::cout << "D: " << c++ << std::endl;
+        inorder(node, depth + 1);
+        std::cout << ast->Type << std::endl;
+    }
+    std::cout << depth << "---\n";
+}
+#endif
+
 int main(int argc, const char **argv) {
   if (argc != 3) {
     std::cerr << "[Usage] " << argv[0] << " source_file target_file\n";
@@ -496,6 +567,9 @@ int main(int argc, const char **argv) {
   }
   Parser PS(std::move(Source));
   AST *Program = PS.parse();
+#ifdef DEBUG
+  inorder(Program);
+#endif
   DCCodeGen DCG(PS.getSymbolTable(), std::move(Target));
   DCG.genProgram(Program);
   delete Program;
