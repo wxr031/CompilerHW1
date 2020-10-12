@@ -419,24 +419,20 @@ AST *Parser::parseExpression(AST *LHS) {
   }
   AST *Node = new AST(nodeType);
   AST *RHS = parseValue();
-  if (TK.peekToken().Type == BIN_OP_MUL || TK.peekToken().Type == BIN_OP_DIV) {
+  AST *LHS2 = RHS;
+  while (TK.peekToken().Type == BIN_OP_MUL || TK.peekToken().Type == BIN_OP_DIV) {
     TokenType Type2 = TK.peekToken().Type;
     TK.readToken();
     AST *RHS2 = parseValue();
     AST *Node2 = new AST(Type2 == BIN_OP_MUL ? BIN_MUL_NODE : BIN_DIV_NODE);
-    AST *LHS2 = RHS;
-    Node2->Value = promoteType(LHS, RHS);
+    Node2->Value = promoteType(LHS2, RHS2);
     Node2->SubTree = {LHS2, RHS2};
-    RHS = parseExpression(Node2);
-    Node->Value = promoteType(LHS, RHS);
-    Node->SubTree = {RHS, LHS};
-    return parseExpression(Node);
+    LHS2 = Node2;
   }
-  else {
-    Node->Value = promoteType(LHS, RHS);
-    Node->SubTree = {LHS, RHS};
-    return parseExpression(Node);
-  }
+  RHS = LHS2;
+  Node->Value = promoteType(LHS, RHS);
+  Node->SubTree = {LHS, RHS};
+  return parseExpression(Node);
 }
 
 class DCCodeGen {
