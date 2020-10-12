@@ -368,10 +368,6 @@ AST *Parser::parseParenExpression() {
   else {
     AST *LHS = parseValue();
     AST *Expr = parseExpression(LHS);
-    if (TK.peekToken().Type != RIGHT_PARAM) {
-      emitError("Parser", "unmatched parentheses.");
-    }
-    TK.readToken();
     return Expr;
   }
 }
@@ -435,6 +431,8 @@ AST *Parser::parseValue() {
 
 AST *Parser::parseExpression(AST *LHS) {
   if (TK.peekToken().Type == RIGHT_PARAM) {
+    /* strip right parentheses */
+    TK.readToken();
     return LHS;
   }
   if (TK.peekToken().Type == LEFT_PARAM) {
