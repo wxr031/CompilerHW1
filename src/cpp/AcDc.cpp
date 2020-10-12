@@ -338,10 +338,16 @@ AST *Parser::parseAssignment(char ID) {
   size_t Var = ST.getVarID(ID);
   if (TokenType T = TK.readToken().Type; T != BIN_OP_ASSIGN)
     emitError("Parser", "expecting BIN_OP_ASSIGN, but ", T, " found.");
-
-  // AST *LHS = parseValue();
-  // AST *Expr = parseExpression(LHS);
-  AST *Expr = parseParenExpression();
+  AST *Expr;
+  if (TK.peekToken().Type == LEFT_PARAM) {
+    TK.readToken();
+    AST *LHS = parseParenExpression();
+    Expr = parseExpression(LHS);
+  }
+  else {
+    AST *LHS = parseValue();
+    Expr = parseExpression(LHS);
+  }
 
   if (getDataType(Expr) == DATA_FLOAT && ST.getVarType(Var) == VAR_INT)
     emitError("Parser", "cannot convert float to integer.");
@@ -350,6 +356,24 @@ AST *Parser::parseAssignment(char ID) {
   return Node;
 }
 AST *Parser::parseParenExpression() {
+  if (TK.peekToken().Type == RIGHT_PARAM) {
+    emitError("Parser", "unmatched parentheses.");
+  }
+  if (TK.peekToken().Type == LEFT_PARAM) {
+    TK.readToken();
+    AST *LHS = parseParenExpression();
+    AST *Expr = parseExpression(LHS);
+    return Expr;
+  }
+  else {
+    AST *LHS = parseValue();
+    AST *Expr = parseExpression(LHS);
+    if (TK.peekToken().Type != RIGHT_PARAM) {
+      emitError("Parser", "unmatched parentheses.");
+    }
+    TK.readToken();
+    return Expr;
+  }
 }
 
 DataType Parser::getDataType(AST *Node) const {
@@ -410,13 +434,20 @@ AST *Parser::parseValue() {
 }
 
 AST *Parser::parseExpression(AST *LHS) {
-  TokenType Type = TK.peekToken().Type;
-  if (Type != BIN_OP_ADD && Type != BIN_OP_SUB && Type != BIN_OP_MUL && Type != BIN_OP_DIV)
+  if (TK.peekToken().Type == RIGHT_PARAM) {
     return LHS;
+  }
+  if (TK.peekToken().Type == LEFT_PARAM) {
+    return parseParenExpression();
+  }
+  if (TK.peekToken().Type != BIN_OP_ADD && TK.peekToken().Type != BIN_OP_SUB
+      && TK.peekToken().Type != BIN_OP_MUL && TK.peekToken().Type != BIN_OP_DIV
+      && TK.peekToken().Type != LEFT_PARAM) {
+    return LHS;
+  }
 
-  TK.readToken();
   ASTNodeType nodeType;
-  switch (Type) {
+  switch (TK.peekToken().Type) {
     case BIN_OP_ADD:
       nodeType = BIN_ADD_NODE;
       break;
@@ -433,18 +464,48 @@ AST *Parser::parseExpression(AST *LHS) {
     __builtin_unreachable();
   }
   AST *Node = new AST(nodeType);
-  AST *RHS = parseValue();
-  AST *LHS2 = RHS;
-  while (TK.peekToken().Type == BIN_OP_MUL || TK.peekToken().Type == BIN_OP_DIV) {
-    TokenType Type2 = TK.peekToken().Type;
+  TK.readToken();
+
+  /*
+   * Check whether the right hand side expression consists of parentheses
+   */
+  AST *RHS;
+  if (TK.peekToken().Type == LEFT_PARAM) {
     TK.readToken();
-    AST *RHS2 = parseValue();
-    AST *Node2 = new AST(Type2 == BIN_OP_MUL ? BIN_MUL_NODE : BIN_DIV_NODE);
-    Node2->Value = promoteType(LHS2, RHS2);
-    Node2->SubTree = {LHS2, RHS2};
-    LHS2 = Node2;
+    RHS = parseParenExpression();
   }
-  RHS = LHS2;
+  else {
+    RHS = parseValue();
+  }
+  
+  if (TK.peekToken().Type == BIN_OP_MUL || TK.peekToken().Type == BIN_OP_DIV) {
+    AST *LHS2 = RHS;
+    while (TK.peekToken().Type == BIN_OP_MUL || TK.peekToken().Type == BIN_OP_DIV) {
+      /* 
+       * Create multiplication or division node
+       */
+
+      TokenType Type2 = TK.peekToken().Type;
+      AST *Node2 = new AST(Type2 == BIN_OP_MUL ? BIN_MUL_NODE : BIN_DIV_NODE);
+      TK.readToken();
+
+      /*
+       * Check whether the right hand side expression consists of parentheses
+       */
+      AST *RHS2;
+      if (TK.peekToken().Type == LEFT_PARAM) {
+        TK.readToken();
+        RHS2 = parseParenExpression();
+      }
+      else {
+        RHS2 = parseValue();
+      }
+      Node2->Value = promoteType(LHS2, RHS2);
+      Node2->SubTree = {LHS2, RHS2};
+      LHS2 = Node2;
+    }
+    RHS = LHS2;
+  }
   Node->Value = promoteType(LHS, RHS);
   Node->SubTree = {LHS, RHS};
   return parseExpression(Node);
