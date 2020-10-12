@@ -23,6 +23,8 @@ enum TokenType {
   BIN_OP_MUL,    // subtraction operator ("*")
   BIN_OP_DIV,    // subtraction operator ("/")
   BIN_OP_ASSIGN, // assignment operator ("=")
+  LEFT_PARAM,    // left parentheses
+  RIGHT_PARAM,   // right parentheses
   END_OF_FILE    // EOF
 };
 
@@ -127,6 +129,10 @@ Token Tokenizer::getOpToken(char C) const {
     return Token{BIN_OP_DIV};
   case '=':
     return Token{BIN_OP_ASSIGN};
+  case '(':
+    return Token{LEFT_PARAM};
+  case ')':
+    return Token{RIGHT_PARAM};
   default:
     emitError("Tokenizer", "expecting '+', '-', or '=', but '", C, "' found.");
   }
@@ -174,6 +180,10 @@ std::ostream &operator<<(std::ostream &S, TokenType T) {
     return S << "BIN_OP_MUL";
   case BIN_OP_DIV:
     return S << "BIN_OP_DIV";
+  case LEFT_PARAM:
+    return S << "LEFT_PARAM";
+  case RIGHT_PARAM:
+    return S << "RIGHT_PARAM";
   case BIN_OP_ASSIGN:
     return S << "BIN_OP_ASSIGN";
   case END_OF_FILE:
@@ -254,6 +264,7 @@ class Parser {
   AST *parseAssignment(char ID);
   AST *parseDeclaration(TokenType DeclType);
   AST *parseValue();
+  AST *parseParenExpression();
   AST *parseExpression(AST *LHS);
 
   DataType getDataType(AST *Node) const;
@@ -328,13 +339,17 @@ AST *Parser::parseAssignment(char ID) {
   if (TokenType T = TK.readToken().Type; T != BIN_OP_ASSIGN)
     emitError("Parser", "expecting BIN_OP_ASSIGN, but ", T, " found.");
 
-  AST *LHS = parseValue();
-  AST *Expr = parseExpression(LHS);
+  // AST *LHS = parseValue();
+  // AST *Expr = parseExpression(LHS);
+  AST *Expr = parseParenExpression();
+
   if (getDataType(Expr) == DATA_FLOAT && ST.getVarType(Var) == VAR_INT)
     emitError("Parser", "cannot convert float to integer.");
   AST *Node = new AST(ASSIGNMENT_NODE, Expr);
   Node->Value = Var;
   return Node;
+}
+AST *Parser::parseParenExpression() {
 }
 
 DataType Parser::getDataType(AST *Node) const {
