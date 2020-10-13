@@ -264,8 +264,8 @@ class Parser {
   AST *parseAssignment(char ID);
   AST *parseDeclaration(TokenType DeclType);
   AST *parseValue();
-  AST *parseParenExpression();
-  AST *parseExpression(AST *LHS);
+  AST *parseParenExpression(int &paramCount);
+  AST *parseExpression(AST *LHS, int &paramCount);
 
   DataType getDataType(AST *Node) const;
   DataType promoteType(AST *&LHS, AST *&RHS) const;
@@ -338,18 +338,24 @@ AST *Parser::parseAssignment(char ID) {
   size_t Var = ST.getVarID(ID);
   if (TokenType T = TK.readToken().Type; T != BIN_OP_ASSIGN)
     emitError("Parser", "expecting BIN_OP_ASSIGN, but ", T, " found.");
+
+  int paramCount = 0;
   AST *LHS;
   if (TK.peekToken().Type == LEFT_PARAM) {
+    ++paramCount;
     TK.readToken();
-    LHS = parseParenExpression();
+    LHS = parseParenExpression(paramCount);
+  }
+  else if (TK.peekToken().Type == IDENTIFIER || TK.peekToken().Type == CONST_INT || TK.peekToken().Type == CONST_FLOAT){
+    LHS = parseValue();
   }
   else {
-    LHS = parseValue();
-    if (TK.peekToken().Type == RIGHT_PARAM || TK.peekToken().Type == LEFT_PARAM) {
-      emitError("Parser", "unmatched parentheses");
-    }
+    emitError("Parser", "expecting LEFT_PARAM, IDENTIFIER, CONST_INT, CONST_FLOAT, but ", TK.peekToken().Type, " found.");
   }
-  AST *Expr = parseExpression(LHS);
+  AST *Expr = parseExpression(LHS, paramCount);
+  if (paramCount != 0) {
+    emitError("Parser", "unmatched parentheses");
+  }
 
   if (getDataType(Expr) == DATA_FLOAT && ST.getVarType(Var) == VAR_INT)
     emitError("Parser", "cannot convert float to integer.");
@@ -357,19 +363,20 @@ AST *Parser::parseAssignment(char ID) {
   Node->Value = Var;
   return Node;
 }
-AST *Parser::parseParenExpression() {
+AST *Parser::parseParenExpression(int &paramCount) {
   if (TK.peekToken().Type == RIGHT_PARAM) {
     emitError("Parser", "No expression in parentheses pair");
   }
   if (TK.peekToken().Type == LEFT_PARAM) {
     TK.readToken();
-    AST *LHS = parseParenExpression();
-    AST *Expr = parseExpression(LHS);
+    ++paramCount;
+    AST *LHS = parseParenExpression(paramCount);
+    AST *Expr = parseExpression(LHS, paramCount);
     return Expr;
   }
   else {
     AST *LHS = parseValue();
-    AST *Expr = parseExpression(LHS);
+    AST *Expr = parseExpression(LHS, paramCount);
     return Expr;
   }
 }
@@ -431,14 +438,16 @@ AST *Parser::parseValue() {
   return Node;
 }
 
-AST *Parser::parseExpression(AST *LHS) {
+AST *Parser::parseExpression(AST *LHS, int &paramCount) {
   if (TK.peekToken().Type == RIGHT_PARAM) {
+    --paramCount;
     /* strip right parentheses */
     TK.readToken();
     return LHS;
   }
   if (TK.peekToken().Type == LEFT_PARAM) {
-    return parseParenExpression();
+    ++paramCount;
+    return parseParenExpression(paramCount);
   }
   if (TK.peekToken().Type != BIN_OP_ADD && TK.peekToken().Type != BIN_OP_SUB
       && TK.peekToken().Type != BIN_OP_MUL && TK.peekToken().Type != BIN_OP_DIV
@@ -472,7 +481,8 @@ AST *Parser::parseExpression(AST *LHS) {
   AST *RHS;
   if (TK.peekToken().Type == LEFT_PARAM) {
     TK.readToken();
-    RHS = parseParenExpression();
+    ++paramCount;
+    RHS = parseParenExpression(paramCount);
   }
   else {
     RHS = parseValue();
@@ -495,7 +505,8 @@ AST *Parser::parseExpression(AST *LHS) {
       AST *RHS2;
       if (TK.peekToken().Type == LEFT_PARAM) {
         TK.readToken();
-        RHS2 = parseParenExpression();
+        ++paramCount;
+        RHS2 = parseParenExpression(paramCount);
       }
       else {
         RHS2 = parseValue();
@@ -508,7 +519,7 @@ AST *Parser::parseExpression(AST *LHS) {
   }
   Node->Value = promoteType(LHS, RHS);
   Node->SubTree = {LHS, RHS};
-  return parseExpression(Node);
+  return parseExpression(Node, paramCount);
 }
 
 class DCCodeGen {
