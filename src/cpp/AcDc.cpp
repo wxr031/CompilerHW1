@@ -338,16 +338,18 @@ AST *Parser::parseAssignment(char ID) {
   size_t Var = ST.getVarID(ID);
   if (TokenType T = TK.readToken().Type; T != BIN_OP_ASSIGN)
     emitError("Parser", "expecting BIN_OP_ASSIGN, but ", T, " found.");
-  AST *Expr;
+  AST *LHS;
   if (TK.peekToken().Type == LEFT_PARAM) {
     TK.readToken();
-    AST *LHS = parseParenExpression();
-    Expr = parseExpression(LHS);
+    LHS = parseParenExpression();
   }
   else {
-    AST *LHS = parseValue();
-    Expr = parseExpression(LHS);
+    LHS = parseValue();
+    if (TK.peekToken().Type == RIGHT_PARAM || TK.peekToken().Type == LEFT_PARAM) {
+      emitError("Parser", "unmatched parentheses");
+    }
   }
+  AST *Expr = parseExpression(LHS);
 
   if (getDataType(Expr) == DATA_FLOAT && ST.getVarType(Var) == VAR_INT)
     emitError("Parser", "cannot convert float to integer.");
@@ -357,7 +359,7 @@ AST *Parser::parseAssignment(char ID) {
 }
 AST *Parser::parseParenExpression() {
   if (TK.peekToken().Type == RIGHT_PARAM) {
-    emitError("Parser", "unmatched parentheses.");
+    emitError("Parser", "No expression in parentheses pair");
   }
   if (TK.peekToken().Type == LEFT_PARAM) {
     TK.readToken();
