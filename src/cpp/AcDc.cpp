@@ -238,6 +238,8 @@ public:
     if (VarID.find(ID) != VarID.end())
       emitError("SymbolTable", "redeclaration of variable ", ID);
     size_t Res = (VarID[ID] = VarType.size());
+    if (VarID.size() > 23)
+      emitError("SymbolTable", "number of variables exceed 23");
     VarType.push_back((DeclType == DECL_INT ? VAR_INT : VAR_FLOAT));
     return Res;
   }
@@ -262,6 +264,7 @@ class Parser {
   AST *parseValue();
   AST *parseParenExpression(int &paramCount);
   AST *parseExpression(AST *LHS, int &paramCount);
+  int constantFolding(AST *Node, AST *LHS, AST *RHS);
 
   DataType getDataType(AST *Node) const;
   DataType promoteType(AST *&LHS, AST *&RHS) const;
@@ -269,7 +272,6 @@ class Parser {
 public:
   Parser(std::ifstream &&S) : TK(std::move(S)) {}
   const SymbolTable &getSymbolTable() const { return ST; }
-
   AST *parse();
 };
 
@@ -426,6 +428,81 @@ AST *Parser::parseValue() {
   return Node;
 }
 
+int Parser::constantFolding(AST *Node, AST *LHS, AST *RHS) {
+  if (LHS->Type == CONST_INT_NODE && RHS->Type == CONST_INT_NODE) {
+    int leftInt = std::get<int>(LHS->Value);
+    int rightInt = std::get<int>(RHS->Value);
+    int folded;
+    if (Node->Type == BIN_ADD_NODE) {
+      folded = leftInt + rightInt;
+    }
+    else if (Node->Type == BIN_SUB_NODE) {
+      folded = leftInt - rightInt;
+    }
+    else if (Node->Type == BIN_MUL_NODE) {
+      folded = leftInt * rightInt;
+    }
+    else if (Node->Type == BIN_DIV_NODE) {
+      folded = leftInt / rightInt;
+    }
+    Node->Type = CONST_INT_NODE;
+    Node->Value = folded;
+    return 1;
+  }
+  if ((LHS->Type == CONST_FLOAT_NODE && RHS->Type == CONST_FLOAT_NODE)
+      || (LHS->Type == CONST_FLOAT_NODE && RHS->Type == CONST_INT_NODE)
+      || (LHS->Type == CONST_FLOAT_NODE && RHS->Type == CONVERSION_NODE)
+      || (LHS->Type == CONST_INT_NODE && RHS->Type == CONST_FLOAT_NODE)
+      || (LHS->Type == CONVERSION_NODE && RHS->Type == CONST_FLOAT_NODE)) {
+
+    float leftFloat;
+    if (LHS->Type == CONST_FLOAT_NODE) {
+      leftFloat = std::get<float>(LHS->Value);
+    }
+    else if (LHS->Type == CONST_INT_NODE) {
+      leftFloat = static_cast<float>(std::get<int>(LHS->Value));
+    }
+    else if (LHS->Type == CONVERSION_NODE) {
+      leftFloat = static_cast<float>(std::get<int>(LHS->SubTree[0]->Value));
+    }
+    else {
+      __builtin_unreachable();
+    }
+    
+    float rightFloat;
+    if (RHS->Type == CONST_FLOAT_NODE) {
+      rightFloat = std::get<float>(RHS->Value);
+    }
+    else if (RHS->Type == CONST_INT_NODE) {
+      rightFloat = static_cast<float>(std::get<int>(RHS->Value));
+    }
+    else if (RHS->Type == CONVERSION_NODE) {
+      rightFloat = static_cast<float>(std::get<int>(RHS->SubTree[0]->Value));
+    }
+    else {
+      __builtin_unreachable();
+    }
+
+    float folded;
+    if (Node->Type == BIN_ADD_NODE) {
+      folded = leftFloat + rightFloat;
+    }
+    else if (Node->Type == BIN_SUB_NODE) {
+      folded = leftFloat - rightFloat;
+    }
+    else if (Node->Type == BIN_MUL_NODE) {
+      folded = leftFloat * rightFloat;
+    }
+    else if (Node->Type == BIN_DIV_NODE) {
+      folded = leftFloat / rightFloat;
+    }
+    Node->Type = CONST_FLOAT_NODE;
+    Node->Value = folded;
+    return 1;
+  }
+  return 0;
+}
+
 AST *Parser::parseExpression(AST *LHS, int &paramCount) {
   if (TK.peekToken().Type == RIGHT_PARAM) {
     --paramCount;
@@ -433,13 +510,8 @@ AST *Parser::parseExpression(AST *LHS, int &paramCount) {
     TK.readToken();
     return LHS;
   }
-  if (TK.peekToken().Type == LEFT_PARAM) {
-    ++paramCount;
-    return parseParenExpression(paramCount);
-  }
   if (TK.peekToken().Type != BIN_OP_ADD && TK.peekToken().Type != BIN_OP_SUB
-      && TK.peekToken().Type != BIN_OP_MUL && TK.peekToken().Type != BIN_OP_DIV
-      && TK.peekToken().Type != LEFT_PARAM) {
+      && TK.peekToken().Type != BIN_OP_MUL && TK.peekToken().Type != BIN_OP_DIV) {
     return LHS;
   }
 
@@ -500,13 +572,23 @@ AST *Parser::parseExpression(AST *LHS, int &paramCount) {
         RHS2 = parseValue();
       }
       Node2->Value = promoteType(LHS2, RHS2);
-      Node2->SubTree = {LHS2, RHS2};
+
+      /* constand folding */
+
+      if (!constantFolding(Node2, LHS2, RHS2)) {
+        Node2->SubTree = {LHS2, RHS2};
+      }
       LHS2 = Node2;
     }
     RHS = LHS2;
   }
   Node->Value = promoteType(LHS, RHS);
-  Node->SubTree = {LHS, RHS};
+
+  /* constant folding */
+
+  if (!constantFolding(Node, LHS, RHS)) {
+    Node->SubTree = {LHS, RHS};
+  }
   return parseExpression(Node, paramCount);
 }
 
