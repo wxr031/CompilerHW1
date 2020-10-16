@@ -96,23 +96,19 @@ Token Tokenizer::getDeclOrIDToken(char C) {
     C = IFS.get();
   }
   IFS.unget();
-  if (Value.size() > 1)
-    emitError("Tokenizer", "expecting single-character token.");
   Token Tok;
-  switch (Value[0]) {
-  case 'i':
+  if (Value == "i") {
     Tok.Type = DECL_INT;
-    break;
-  case 'f':
+  }
+  else if (Value == "f") {
     Tok.Type = DECL_FLOAT;
-    break;
-  case 'p':
+  }
+  else if (Value == "p") {
     Tok.Type = CMD_PRINT;
-    break;
-  default:
+  }
+  else {
     Tok.Type = IDENTIFIER;
     Tok.Value = Value;
-    break;
   }
   return Tok;
 }
@@ -234,11 +230,11 @@ struct AST {
 };
 
 class SymbolTable {
-  std::unordered_map<char, size_t> VarID;
+  std::unordered_map<std::string, size_t> VarID;
   std::vector<VariableType> VarType;
 
 public:
-  size_t declareSymbol(char ID, TokenType DeclType) {
+  size_t declareSymbol(std::string ID, TokenType DeclType) {
     if (VarID.find(ID) != VarID.end())
       emitError("SymbolTable", "redeclaration of variable ", ID);
     size_t Res = (VarID[ID] = VarType.size());
@@ -246,14 +242,14 @@ public:
     return Res;
   }
 
-  size_t getVarID(char ID) const {
+  size_t getVarID(std::string ID) const {
     auto Iter = VarID.find(ID);
     if (Iter == VarID.end())
       emitError("SymbolTable", "use of undeclared identifier ", ID);
     return Iter->second;
   }
 
-  VariableType getVarType(char ID) const { return VarType[getVarID(ID)]; }
+  VariableType getVarType(std::string ID) const { return VarType[getVarID(ID)]; }
   VariableType getVarType(size_t V) const { return VarType[V]; }
 };
 
@@ -261,7 +257,7 @@ class Parser {
   Tokenizer TK;
   SymbolTable ST;
   AST *parseStatement();
-  AST *parseAssignment(char ID);
+  AST *parseAssignment(std::string ID);
   AST *parseDeclaration(TokenType DeclType);
   AST *parseValue();
   AST *parseParenExpression(int &paramCount);
@@ -301,9 +297,7 @@ AST *Parser::parseStatement() {
     return parseDeclaration(Tok.Type);
 
   if (Tok.Type == IDENTIFIER) {
-    assert(Tok.Value.size() == 1 &&
-           "Variable names with multiple characters are not supported.");
-    return parseAssignment(Tok.Value[0]);
+    return parseAssignment(Tok.Value);
   }
 
   if (Tok.Type != CMD_PRINT)
@@ -315,9 +309,7 @@ AST *Parser::parseStatement() {
     emitError("Parser", "expecting IDENTIFIER, but ", Tok.Type, " found.");
 
   // Print statement.
-  assert(Tok.Value.size() == 1 &&
-         "Variable names with multiple characters are not supported.");
-  size_t Var = ST.getVarID(Tok.Value[0]);
+  size_t Var = ST.getVarID(Tok.Value);
   AST *Node = new AST(PRINTSTMT_NODE);
   Node->Value = Var;
   return Node;
@@ -328,13 +320,11 @@ AST *Parser::parseDeclaration(TokenType DeclType) {
   if (Tok.Type != IDENTIFIER)
     emitError("Parser", "expecting IDENTIFIER, but ", DeclType, " found.");
   AST *Node = new AST(DECLARATION_NODE);
-  assert(Tok.Value.size() == 1 &&
-         "Variable names with multiple characters are not supported.");
-  Node->Value = ST.declareSymbol(Tok.Value[0], DeclType);
+  Node->Value = ST.declareSymbol(Tok.Value, DeclType);
   return Node;
 }
 
-AST *Parser::parseAssignment(char ID) {
+AST *Parser::parseAssignment(std::string ID) {
   size_t Var = ST.getVarID(ID);
   if (TokenType T = TK.readToken().Type; T != BIN_OP_ASSIGN)
     emitError("Parser", "expecting BIN_OP_ASSIGN, but ", T, " found.");
@@ -427,9 +417,7 @@ AST *Parser::parseValue() {
     break;
   case IDENTIFIER:
     Node->Type = IDENTIFIER_NODE;
-    assert(Tok.Value.size() == 1 &&
-           "Variable names with multiple characters are not supported.");
-    Node->Value = ST.getVarID(Tok.Value[0]);
+    Node->Value = ST.getVarID(Tok.Value);
     break;
   default:
     emitError("Parser", "expecting CONST_INT, CONST_FLOAT or IDENTIFIER, but ",
@@ -619,20 +607,6 @@ void DCCodeGen::genPrintStmt(AST *Stmt) {
   OFS << "p\n";
 }
 
-#ifdef DEBUG
-void inorder(AST *ast, int depth = 0) {
-    if (ast->SubTree.size() == 0)
-        return;
-    int c = 0;
-    for (AST *node : ast->SubTree) {
-        std::cout << "D: " << c++ << std::endl;
-        inorder(node, depth + 1);
-        std::cout << ast->Type << std::endl;
-    }
-    std::cout << depth << "---\n";
-}
-#endif
-
 int main(int argc, const char **argv) {
   if (argc != 3) {
     std::cerr << "[Usage] " << argv[0] << " source_file target_file\n";
@@ -650,9 +624,6 @@ int main(int argc, const char **argv) {
   }
   Parser PS(std::move(Source));
   AST *Program = PS.parse();
-#ifdef DEBUG
-  inorder(Program);
-#endif
   DCCodeGen DCG(PS.getSymbolTable(), std::move(Target));
   DCG.genProgram(Program);
   delete Program;
